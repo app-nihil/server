@@ -31,6 +31,8 @@ func SetupRoutes(router *gin.Engine, redis *redisdb.Client, hub *ws.Hub, corsOri
 	router.POST("/activation/validate", handlers.ValidateActivationCode)
 	router.POST("/activation/claim", handlers.ClaimActivationCode)
 	router.POST("/checkout/create", handlers.CreateCheckout)
+	router.POST("/checkout/team", handlers.CreateTeamCheckout)
+	router.GET("/checkout/team/calculate", handlers.CalculateTeamPrice)
 	router.GET("/activation/codes", handlers.GetActivationCodes)
 
 	// WebSocket
@@ -60,7 +62,7 @@ func SetupRoutes(router *gin.Engine, redis *redisdb.Client, hub *ws.Hub, corsOri
 
 		// Push notifications
 		auth.POST("/device/fcm-token", handlers.RegisterFCMToken)
-                auth.DELETE("/device/purge", handlers.PurgeDevice)
+		auth.DELETE("/device/purge", handlers.PurgeDevice)
 	}
 }
 
