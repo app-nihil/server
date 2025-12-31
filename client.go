@@ -2,27 +2,11 @@ package stripe
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stripe/stripe-go/v82/price"
 )
-
-// =============================================================================
-// STRIPE PRICE ID CONFIGURATION
-// =============================================================================
-//
-// IMPORTANT: These price IDs must match your Stripe Dashboard exactly.
-// If you change prices in Stripe, update these values.
-//
-// To find price IDs:
-// 1. Go to https://dashboard.stripe.com/products
-// 2. Click on a product
-// 3. Copy the price ID (starts with "price_")
-//
-// Last verified: December 2024
-// =============================================================================
 
 var Plans = map[string]string{
 	"1_day_solo":   "price_1Sii7HCTw854gz2wyytgU8MC",
@@ -37,22 +21,19 @@ var Plans = map[string]string{
 	"1_year_duo":   "price_1SiiC6CTw854gz2w6HvqMj7c",
 }
 
-// PlanPrices stores expected prices in cents for validation
-// These should match the prices configured in Stripe
 var PlanPrices = map[string]int64{
-	"1_day_solo":   500,   // €5.00
-	"1_week_solo":  1500,  // €15.00
-	"1_month_solo": 4900,  // €49.00
-	"3_month_solo": 12900, // €129.00
-	"1_year_solo":  39900, // €399.00
-	"1_day_duo":    800,   // €8.00
-	"1_week_duo":   2500,  // €25.00
-	"1_month_duo":  7900,  // €79.00
-	"3_month_duo":  19900, // €199.00
-	"1_year_duo":   59900, // €599.00
+	"1_day_solo":   500,
+	"1_week_solo":  1500,
+	"1_month_solo": 4900,
+	"3_month_solo": 12900,
+	"1_year_solo":  39900,
+	"1_day_duo":    800,
+	"1_week_duo":   2500,
+	"1_month_duo":  7900,
+	"3_month_duo":  19900,
+	"1_year_duo":   59900,
 }
 
-// SoloBasePrices in cents - used for TEAM dynamic pricing calculation
 var SoloBasePrices = map[string]int64{
 	"1_day":   500,
 	"1_week":  1500,
@@ -61,7 +42,6 @@ var SoloBasePrices = map[string]int64{
 	"1_year":  39900,
 }
 
-// DurationLabels for display in checkout
 var DurationLabels = map[string]string{
 	"1_day":   "1 Day",
 	"1_week":  "1 Week",
@@ -86,12 +66,7 @@ func GetClient() *Client {
 	return globalClient
 }
 
-// ValidatePriceIDs checks that all configured price IDs exist in Stripe
-// and optionally validates the prices match expected values.
-// Call this on server startup to detect config drift early.
 func (c *Client) ValidatePriceIDs(validatePrices bool) error {
-	log.Println("Validating Stripe price IDs...")
-
 	for plan, priceID := range Plans {
 		p, err := price.Get(priceID, nil)
 		if err != nil {
@@ -99,19 +74,17 @@ func (c *Client) ValidatePriceIDs(validatePrices bool) error {
 		}
 
 		if !p.Active {
-			log.Printf("WARNING: Price %s for plan %s is inactive in Stripe", priceID, plan)
+			return fmt.Errorf("price %s for plan %s is inactive", priceID, plan)
 		}
 
 		if validatePrices {
 			expectedPrice, ok := PlanPrices[plan]
 			if ok && p.UnitAmount != expectedPrice {
-				log.Printf("WARNING: Price mismatch for %s - expected %d cents, got %d cents",
-					plan, expectedPrice, p.UnitAmount)
+				return fmt.Errorf("price mismatch for %s", plan)
 			}
 		}
 	}
 
-	log.Println("Stripe price ID validation complete")
 	return nil
 }
 
@@ -143,8 +116,6 @@ func (c *Client) CreateCheckoutSession(plan string, successURL, cancelURL string
 	return session.New(params)
 }
 
-// CreateTeamCheckoutSession creates a checkout session for TEAM plans with dynamic pricing
-// TEAM plans use dynamic PriceData instead of fixed price IDs, avoiding config drift
 func (c *Client) CreateTeamCheckoutSession(duration string, deviceCount int, successURL, cancelURL string) (*stripe.CheckoutSession, error) {
 	basePrice, ok := SoloBasePrices[duration]
 	if !ok {
@@ -160,13 +131,8 @@ func (c *Client) CreateTeamCheckoutSession(duration string, deviceCount int, suc
 		return nil, fmt.Errorf("invalid duration: %s", duration)
 	}
 
-	// Calculate discount: device_count + 18 (so 3 devices = 21%, 50 devices = 68%)
 	discountPercent := deviceCount + 18
-
-	// Price per device with discount
 	pricePerDevice := basePrice * int64(100-discountPercent) / 100
-
-	// Total price
 	totalPrice := pricePerDevice * int64(deviceCount)
 
 	params := &stripe.CheckoutSessionParams{
@@ -216,7 +182,6 @@ func GetPlanPrice(plan string) (int64, bool) {
 	return price, ok
 }
 
-// CalculateTeamPrice returns price per device and total price in cents
 func CalculateTeamPrice(duration string, deviceCount int) (pricePerDevice int64, totalPrice int64, discountPercent int, err error) {
 	basePrice, ok := SoloBasePrices[duration]
 	if !ok {
