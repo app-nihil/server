@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -298,6 +299,75 @@ func (h *Handlers) CreateCheckout(c *gin.Context) {
 	})
 }
 
+// CreateTeamCheckout handles TEAM plan checkout with dynamic pricing
+type CreateTeamCheckoutRequest struct {
+	Duration    string `json:"duration" binding:"required"`
+	DeviceCount int    `json:"device_count" binding:"required"`
+}
+
+func (h *Handlers) CreateTeamCheckout(c *gin.Context) {
+	var req CreateTeamCheckoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	if !stripeClient.IsTeamDurationValid(req.Duration) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid duration"})
+		return
+	}
+
+	if req.DeviceCount < 3 || req.DeviceCount > 50 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "device count must be between 3 and 50"})
+		return
+	}
+
+	successURL := "https://nihil.app/activate?session_id={CHECKOUT_SESSION_ID}"
+	cancelURL := "https://nihil.app/#pricing"
+
+	sess, err := stripeClient.GetClient().CreateTeamCheckoutSession(req.Duration, req.DeviceCount, successURL, cancelURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create checkout session"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"checkout_url": sess.URL,
+		"session_id":   sess.ID,
+	})
+}
+
+// CalculateTeamPrice endpoint for live price calculation on frontend
+func (h *Handlers) CalculateTeamPrice(c *gin.Context) {
+	duration := c.Query("duration")
+	deviceCountStr := c.Query("device_count")
+
+	if duration == "" || deviceCountStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "duration and device_count required"})
+		return
+	}
+
+	deviceCount, err := strconv.Atoi(deviceCountStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_count"})
+		return
+	}
+
+	pricePerDevice, totalPrice, discountPercent, err := stripeClient.CalculateTeamPrice(duration, deviceCount)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"price_per_device": pricePerDevice,
+		"total_price":      totalPrice,
+		"discount_percent": discountPercent,
+		"device_count":     deviceCount,
+		"duration":         duration,
+	})
+}
+
 func generateToken() string {
 	return uuid.New().String()[:8] + "-" + uuid.New().String()[:4] + "-" + uuid.New().String()[:4] + "-" + uuid.New().String()[:4]
 }
@@ -481,13 +551,13 @@ func (h *Handlers) RegisterFCMToken(c *gin.Context) {
 }
 
 func (h *Handlers) PurgeDevice(c *gin.Context) {
-deviceUUID := c.GetString("device_uuid")
-ctx := c.Request.Context()
+	deviceUUID := c.GetString("device_uuid")
+	ctx := c.Request.Context()
 
-if err := h.redis.PurgeDevice(ctx, deviceUUID); err != nil {
-c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to purge device"})
-return
-}
+	if err := h.redis.PurgeDevice(ctx, deviceUUID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to purge device"})
+		return
+	}
 
-c.JSON(http.StatusOK, gin.H{"success": true})
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
